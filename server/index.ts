@@ -1,11 +1,21 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
 const app = express();
+const httpServer = createServer(app);
+
+// ✅ Create a socket.io server
+const io = new Server(httpServer, {
+  cors: { origin: "*" }
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// 🧪 Log and basic middleware (unchanged)
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -36,6 +46,22 @@ app.use((req, res, next) => {
   next();
 });
 
+// ✅ Socket.io connection test
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+
+  // Listen for "hello" messages from client
+  socket.on("hello", (msg) => {
+    console.log("Received hello:", msg);
+    // broadcast to everyone else
+    socket.broadcast.emit("hello", msg);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+  });
+});
+
 (async () => {
   const server = await registerRoutes(app);
 
@@ -47,25 +73,16 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
+
+  // 🟢 Important: start the httpServer, not the express server
+  httpServer.listen(port, "0.0.0.0", () => {
+    log(`🚀 Server with Socket.io running on port ${port}`);
   });
 })();
